@@ -1,7 +1,7 @@
 # WallStreetBuddy
 
 Fork from https://github.com/sdhaduk/WallStreetBuddy
-Frontend Update that exposed LoadBalancer Securty flaw at wsbuddy.app allowing a proxy connection to prod backend. Rest of description unchanged.
+Frontend Update that exposed securty flaw at wsbuddy.app allowing a proxy connection to prod backend. Rest of description unchanged.
 
 **Live Application**: https://wsbuddy.app
 
