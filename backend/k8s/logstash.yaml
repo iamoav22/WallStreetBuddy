@@ -1,0 +1,84 @@
+---
+# Persistent Volume Claim for Logstash data (pipeline state, dead letter queue)
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: logstash-data-pvc
+  namespace: wallstreetbuddy
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 1Gi  # Pipeline state and buffering
+  storageClassName: standard-rwo
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: logstash
+  namespace: wallstreetbuddy
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: logstash
+  template:
+    metadata:
+      labels:
+        app: logstash
+    spec:
+      # CRITICAL: Fix persistent volume permissions
+      securityContext:
+        fsGroup: 1000  # Ensures mounted volumes are writable by logstash user
+      containers:
+      - name: logstash
+        image: docker.elastic.co/logstash/logstash:8.11.0
+        ports:
+        - containerPort: 5044
+        - containerPort: 9600
+        env:
+        - name: LS_JAVA_OPTS
+          value: "-Xmx256m -Xms256m"
+        resources:
+          requests:
+            cpu: 100m
+            memory: 768Mi
+          limits:
+            cpu: 300m
+            memory: 1Gi
+        volumeMounts:
+        - name: logstash-pipeline
+          mountPath: /usr/share/logstash/pipeline
+        - name: logstash-config
+          mountPath: /usr/share/logstash/config
+        # CRITICAL: Mount persistent volume for pipeline state
+        - name: logstash-data
+          mountPath: /usr/share/logstash/data
+      volumes:
+      - name: logstash-pipeline
+        configMap:
+          name: logstash-pipeline
+      - name: logstash-config
+        configMap:
+          name: logstash-config
+      # CRITICAL: Attach persistent volume
+      - name: logstash-data
+        persistentVolumeClaim:
+          claimName: logstash-data-pvc
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: logstash
+  namespace: wallstreetbuddy
+spec:
+  ports:
+  - name: beats
+    port: 5044
+    targetPort: 5044
+  - name: monitoring
+    port: 9600
+    targetPort: 9600
+  selector:
+    app: logstash

@@ -1,0 +1,474 @@
+import requests
+import json
+import time
+
+ELASTICSEARCH_URL = "http://localhost:9200"
+
+def wait_for_elasticsearch():
+    """Wait for Elasticsearch to be ready"""
+    print("Waiting for Elasticsearch to be ready...")
+    max_retries = 30
+    for i in range(max_retries):
+        try:
+            response = requests.get(f"{ELASTICSEARCH_URL}/_cluster/health")
+            if response.status_code == 200:
+                print("✅ Elasticsearch is ready!")
+                return True
+        except requests.exceptions.RequestException:
+            pass
+        
+        print(f"Waiting... ({i+1}/{max_retries})")
+        time.sleep(2)
+    
+    print("❌ Elasticsearch is not responding")
+    return False
+
+def create_ilm_policy():
+    """Create Index Lifecycle Management policy for 8-day data retention"""
+    policy = {
+        "policy": {
+            "phases": {
+                "hot": {
+                    "actions": {
+                        "set_priority": {
+                            "priority": 100
+                        }
+                    }
+                },
+                "delete": {
+                    "min_age": "8d",
+                    "actions": {
+                        "delete": {}
+                    }
+                }
+            }
+        }
+    }
+    
+    response = requests.put(
+        f"{ELASTICSEARCH_URL}/_ilm/policy/ticker-mentions-policy",
+        headers={"Content-Type": "application/json"},
+        data=json.dumps(policy)
+    )
+    
+    if response.status_code in [200, 201]:
+        print("✅ ILM policy created successfully!")
+        return True
+    else:
+        print(f"❌ Failed to create ILM policy: {response.status_code}")
+        print(f"Error: {response.text}")
+        return False
+
+def create_analysis_ilm_policy():
+    """Create Index Lifecycle Management policy for 4-day analysis report retention"""
+    policy = {
+        "policy": {
+            "phases": {
+                "hot": {
+                    "actions": {
+                        "set_priority": {
+                            "priority": 50
+                        }
+                    }
+                },
+                "delete": {
+                    "min_age": "4d",
+                    "actions": {
+                        "delete": {}
+                    }
+                }
+            }
+        }
+    }
+
+    response = requests.put(
+        f"{ELASTICSEARCH_URL}/_ilm/policy/stock-analysis-policy",
+        headers={"Content-Type": "application/json"},
+        data=json.dumps(policy)
+    )
+
+    if response.status_code in [200, 201]:
+        print("✅ Analysis ILM policy created successfully!")
+        return True
+    else:
+        print(f"❌ Failed to create analysis ILM policy: {response.status_code}")
+        print(f"Error: {response.text}")
+        return False
+
+def create_index_template():
+    """Create index template for ticker-mentions indices optimized for aggregations"""
+    template = {
+        "index_patterns": ["ticker-mentions-*"],
+        "template": {
+            "settings": {
+                "number_of_shards": 1,
+                "number_of_replicas": 0,
+                "refresh_interval": "30s",
+                "index.lifecycle.name": "ticker-mentions-policy",
+                "index.lifecycle.rollover_alias": "ticker-mentions"
+            },
+            "mappings": {
+                "properties": {
+                    "@timestamp": {
+                        "type": "date"
+                    },
+                    "processed_at": {
+                        "type": "date"
+                    },
+                    "date_only": {
+                        "type": "date",
+                        "format": "yyyy-MM-dd"
+                    },
+                    "id": {
+                        "type": "keyword"
+                    },
+                    "subreddit": {
+                        "type": "keyword"
+                    },
+                    "body": {
+                        "type": "text",
+                        "analyzer": "standard",
+                        "fields": {
+                            "keyword": {
+                                "type": "keyword",
+                                "ignore_above": 256
+                            }
+                        }
+                    },
+                    "timestamp": {
+                        "type": "date",
+                        "format": "strict_date_optional_time||epoch_millis"
+                    },
+                    "type": {
+                        "type": "keyword"
+                    },
+                    "tickers": {
+                        "type": "keyword"
+                    },
+                    "ticker_count": {
+                        "type": "integer"
+                    },
+                    "processed_timestamp": {
+                        "type": "keyword"
+                    }
+                }
+            }
+        }
+    }
+    
+    response = requests.put(
+        f"{ELASTICSEARCH_URL}/_index_template/ticker-mentions-template",
+        headers={"Content-Type": "application/json"},
+        data=json.dumps(template)
+    )
+    
+    if response.status_code in [200, 201]:
+        print("✅ Index template created successfully!")
+        return True
+    else:
+        print(f"❌ Failed to create index template: {response.status_code}")
+        print(f"Error: {response.text}")
+        return False
+
+def create_analysis_index_template():
+    """Create index template for stock-analysis indices for AI-generated reports"""
+    template = {
+        "index_patterns": ["stock-analysis-*"],
+        "template": {
+            "settings": {
+                "number_of_shards": 1,
+                "number_of_replicas": 0,
+                "refresh_interval": "30s",
+                "index.lifecycle.name": "stock-analysis-policy",
+                "index.lifecycle.rollover_alias": "stock-analysis"
+            },
+            "mappings": {
+                "properties": {
+                    "@timestamp": {
+                        "type": "date"
+                    },
+                    "ticker": {
+                        "type": "keyword"
+                    },
+                    "generation_time": {
+                        "type": "date"
+                    },
+                    "report_content": {
+                        "type": "text",
+                        "analyzer": "standard",
+                        "fields": {
+                            "keyword": {
+                                "type": "keyword",
+                                "ignore_above": 32766
+                            }
+                        }
+                    },
+                    "status": {
+                        "type": "keyword"
+                    },
+                    "generation_duration_ms": {
+                        "type": "integer"
+                    },
+                    "model_used": {
+                        "type": "keyword"
+                    },
+                    "tokens_used": {
+                        "type": "integer"
+                    }
+                }
+            }
+        }
+    }
+
+    response = requests.put(
+        f"{ELASTICSEARCH_URL}/_index_template/stock-analysis-template",
+        headers={"Content-Type": "application/json"},
+        data=json.dumps(template)
+    )
+
+    if response.status_code in [200, 201]:
+        print("✅ Analysis index template created successfully!")
+        return True
+    else:
+        print(f"❌ Failed to create analysis index template: {response.status_code}")
+        print(f"Error: {response.text}")
+        return False
+
+def create_home_batch_ilm_policy():
+    """Create ILM policy for home batch data with 30-day retention"""
+    policy = {
+        "policy": {
+            "phases": {
+                "hot": {
+                    "actions": {
+                        "rollover": {
+                            "max_size": "50GB",
+                            "max_age": "1d"
+                        }
+                    }
+                },
+                "delete": {
+                    "min_age": "30d",
+                    "actions": {
+                        "delete": {}
+                    }
+                }
+            }
+        }
+    }
+
+    response = requests.put(
+        f"{ELASTICSEARCH_URL}/_ilm/policy/home-batch-policy",
+        headers={"Content-Type": "application/json"},
+        data=json.dumps(policy)
+    )
+
+    if response.status_code in [200, 201]:
+        print("✅ Home batch ILM policy created successfully!")
+        return True
+    else:
+        print(f"❌ Failed to create home batch ILM policy: {response.status_code}")
+        print(f"Error: {response.text}")
+        return False
+
+def create_home_batch_index_template():
+    """Create index template for home-batch indices for pre-calculated batch data"""
+    template = {
+        "index_patterns": ["home-batch-*"],
+        "template": {
+            "settings": {
+                "number_of_shards": 1,
+                "number_of_replicas": 0,
+                "refresh_interval": "30s",
+                "index.lifecycle.name": "home-batch-policy",
+                "index.lifecycle.rollover_alias": "home-batch"
+            },
+            "mappings": {
+                "properties": {
+                    "@timestamp": {
+                        "type": "date"
+                    },
+                    "batch_id": {
+                        "type": "keyword"
+                    },
+                    "batch_start": {
+                        "type": "date"
+                    },
+                    "batch_end": {
+                        "type": "date"
+                    },
+                    "top_tickers": {
+                        "type": "nested",
+                        "properties": {
+                            "ticker": {
+                                "type": "keyword"
+                            },
+                            "mentions": {
+                                "type": "long"
+                            }
+                        }
+                    },
+                    "total_mentions": {
+                        "type": "long"
+                    },
+                    "total_posts": {
+                        "type": "long"
+                    },
+                    "status": {
+                        "type": "keyword"
+                    }
+                }
+            }
+        }
+    }
+
+    response = requests.put(
+        f"{ELASTICSEARCH_URL}/_index_template/home-batch-template",
+        headers={"Content-Type": "application/json"},
+        data=json.dumps(template)
+    )
+
+    if response.status_code in [200, 201]:
+        print("✅ Home batch index template created successfully!")
+        return True
+    else:
+        print(f"❌ Failed to create home batch index template: {response.status_code}")
+        print(f"Error: {response.text}")
+        return False
+
+def create_sample_queries():
+    """Print sample Elasticsearch queries based on your requirements"""
+    queries = {
+        "1. Top 10 most mentioned tickers (all subreddits, last 3 days)": {
+            "size": 0,
+            "query": {
+                "range": {
+                    "@timestamp": {
+                        "gte": "now-3d/d"
+                    }
+                }
+            },
+            "aggs": {
+                "ticker_mentions": {
+                    "terms": {
+                        "field": "tickers",
+                        "size": 10,
+                        "order": {"_count": "desc"}
+                    }
+                }
+            }
+        },
+        
+        "2. Top 10 tickers per subreddit (last 3 days)": {
+            "size": 0,
+            "query": {
+                "range": {
+                    "@timestamp": {
+                        "gte": "now-3d/d"
+                    }
+                }
+            },
+            "aggs": {
+                "subreddits": {
+                    "terms": {
+                        "field": "subreddit",
+                        "size": 10
+                    },
+                    "aggs": {
+                        "top_tickers": {
+                            "terms": {
+                                "field": "tickers",
+                                "size": 10,
+                                "order": {"_count": "desc"}
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        
+        "3. Daily mention counts for specific ticker (last 7 days)": {
+            "size": 0,
+            "query": {
+                "bool": {
+                    "must": [
+                        {
+                            "term": {
+                                "tickers": "AAPL"
+                            }
+                        },
+                        {
+                            "range": {
+                                "@timestamp": {
+                                    "gte": "now-7d/d"
+                                }
+                            }
+                        }
+                    ]
+                }
+            },
+            "aggs": {
+                "daily_counts": {
+                    "date_histogram": {
+                        "field": "@timestamp",
+                        "calendar_interval": "1d",
+                        "format": "yyyy-MM-dd"
+                    }
+                }
+            }
+        }
+    }
+    
+    print("\n📝 Sample Elasticsearch Queries for Your Use Cases:")
+    print("=" * 60)
+    for name, query in queries.items():
+        print(f"\n{name}:")
+        print(f"POST /ticker-mentions-*/_search")
+        print(json.dumps(query, indent=2))
+        print("-" * 40)
+
+def main():
+    if not wait_for_elasticsearch():
+        return
+
+    print("🔄 Setting up Elasticsearch for ticker data and analysis reports...")
+
+    success = True
+
+    # Setup ticker mentions infrastructure
+    if not create_ilm_policy():
+        success = False
+
+    if not create_index_template():
+        success = False
+
+    # Setup analysis reports infrastructure
+    if not create_analysis_ilm_policy():
+        success = False
+
+    if not create_analysis_index_template():
+        success = False
+
+    # Setup home batch data infrastructure
+    if not create_home_batch_ilm_policy():
+        success = False
+
+    if not create_home_batch_index_template():
+        success = False
+
+    if success:
+        create_sample_queries()
+        print("\n🎉 Elasticsearch setup completed successfully!")
+        print(f"🔍 Elasticsearch URL: {ELASTICSEARCH_URL}")
+        print("📊 Ticker Index pattern: ticker-mentions-YYYY.MM.DD")
+        print("📋 Analysis Index pattern: stock-analysis-YYYY.MM.DD")
+        print("🏠 Home Batch Index pattern: home-batch-YYYY.MM.DD")
+        print("🗑️  Ticker data retention: 8 days (automatic deletion)")
+        print("🗑️  Analysis data retention: 4 days (automatic deletion)")
+        print("🗑️  Home batch retention: 30 days (automatic deletion)")
+        print("📈 Optimized for ticker aggregations and analysis retrieval")
+    else:
+        print("❌ Setup failed!")
+
+if __name__ == "__main__":
+    main()

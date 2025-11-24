@@ -1,0 +1,99 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: scheduler
+  namespace: wallstreetbuddy
+  labels:
+    app: scheduler
+    component: background-jobs
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: scheduler
+  template:
+    metadata:
+      labels:
+        app: scheduler
+        component: background-jobs
+    spec:
+      securityContext:
+        runAsUser: 1000
+        runAsGroup: 1000
+        fsGroup: 1000
+      containers:
+      - name: scheduler
+        image: gcr.io/wallstreetbuddy/fast-api:v13
+        # Run scheduler-only script instead of FastAPI server
+        command: ["python", "-m", "api.scheduler.scheduler_main"]
+        ports:
+        - containerPort: 8080
+          name: health
+          protocol: TCP
+        env:
+        # Elasticsearch connection
+        - name: ELASTICSEARCH_URL
+          value: "http://elasticsearch-cluster:9200"
+        # Debug mode
+        - name: DEBUG
+          value: "false"
+        # OpenAI API key from secret
+        - name: OPENAI_API_KEY
+          valueFrom:
+            secretKeyRef:
+              name: fastapi-secrets
+              key: openai-api-key
+        # Internal API key from secret
+        - name: INTERNAL_API_KEY
+          valueFrom:
+            secretKeyRef:
+              name: fastapi-secrets
+              key: internal-api-key
+        # Pod identification for logging
+        - name: POD_NAME
+          valueFrom:
+            fieldRef:
+              fieldPath: metadata.name
+        - name: HOSTNAME
+          valueFrom:
+            fieldRef:
+              fieldPath: metadata.name
+        resources:
+          requests:
+            cpu: 50m       
+            memory: 128Mi  
+          limits:
+            cpu: 200m      
+            memory: 256Mi  
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: 8080
+          initialDelaySeconds: 60
+          periodSeconds: 30
+          timeoutSeconds: 5
+          failureThreshold: 3
+        volumeMounts:
+        - name: scheduler-data
+          mountPath: /var/scheduler
+      volumes:
+      - name: scheduler-data
+        persistentVolumeClaim:
+          claimName: scheduler-data-pvc
+      restartPolicy: Always
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: scheduler-data-pvc
+  namespace: wallstreetbuddy
+  labels:
+    app: scheduler
+    component: storage
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 1Gi
+  storageClassName: standard-rwo

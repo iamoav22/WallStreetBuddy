@@ -1,0 +1,7 @@
+# Minimal requirements for spark-processor service
+python-dotenv==1.0.0
+pyspark==3.5.0
+spacy==3.8.2
+kafka-python==2.0.2
+requests==2.31.0
+schedule==1.2.0
