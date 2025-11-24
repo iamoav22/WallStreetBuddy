@@ -1,5 +1,8 @@
 # WallStreetBuddy
 
+Fork from https://github.com/sdhaduk/WallStreetBuddy
+Frontend Update that exposed LoadBalancer Securty flaw at wsbuddy.app allowing a proxy connection to prod backend. Rest of description unchanged.
+
 **Live Application**: https://wsbuddy.app
 
 A real-time financial sentiment analysis platform that monitors Reddit discussions about stocks, extracts ticker mentions, and provides AI-powered stock analysis through an interactive web dashboard.
